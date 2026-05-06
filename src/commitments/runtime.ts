@@ -239,7 +239,7 @@ async function defaultExtractBatch(params: {
     thinkLevel: "off",
     verboseLevel: "off",
     reasoningLevel: "off",
-    fastMode: true,
+    fastMode: false,
     timeoutMs: resolved.extraction.timeoutSeconds * 1000,
     runId,
     bootstrapContextMode: "lightweight",
