@@ -262,7 +262,7 @@ describe("handleManagedOutgoingImageHttpRequest", () => {
     expect(result.statusCode).toBe(403);
   });
 
-  it("allows device-token access without requester session ownership", async () => {
+  it("rejects device-token access without requester session ownership", async () => {
     const { attachmentId, sessionKey } = await createFixture(stateDir);
 
     const { result } = await requestManagedImage({
@@ -271,8 +271,19 @@ describe("handleManagedOutgoingImageHttpRequest", () => {
       authResponse: { authMethod: "device-token" },
     });
 
-    expect(result.statusCode).toBe(200);
-    expect(result.body.toString("utf-8")).toBe("original-image");
+    expect(result.statusCode).toBe(403);
+  });
+
+  it("rejects trusted-proxy access without requester session ownership", async () => {
+    const { attachmentId, sessionKey } = await createFixture(stateDir);
+
+    const { result } = await requestManagedImage({
+      stateDir,
+      pathName: `/api/chat/media/outgoing/${encodeURIComponent(sessionKey)}/${attachmentId}/full`,
+      authResponse: { trustDeclaredOperatorScopes: true },
+    });
+
+    expect(result.statusCode).toBe(403);
   });
 
   it("rejects non-GET methods", async () => {
