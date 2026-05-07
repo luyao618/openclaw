@@ -258,6 +258,11 @@ export function assertGatewayAuthConfigured(
         "gateway auth mode is trusted-proxy, but a shared token is also configured; remove gateway.auth.token / OPENCLAW_GATEWAY_TOKEN because trusted-proxy and token auth are mutually exclusive",
       );
     }
+    if (auth.password) {
+      throw new Error(
+        "gateway auth mode is trusted-proxy, but a password is also configured; remove gateway.auth.password / OPENCLAW_GATEWAY_PASSWORD because trusted-proxy and password auth are mutually exclusive",
+      );
+    }
   }
 }
 
@@ -465,26 +470,6 @@ async function authorizeGatewayConnectCore(
         return originResult;
       }
       return { ok: true, method: "trusted-proxy", user: result.user };
-    }
-    if (localDirect && auth.password && connectAuth?.password) {
-      if (limiter) {
-        const rlCheck: RateLimitCheckResult = limiter.check(ip, rateLimitScope);
-        if (!rlCheck.allowed) {
-          return {
-            ok: false,
-            reason: "rate_limited",
-            rateLimited: true,
-            retryAfterMs: rlCheck.retryAfterMs,
-          };
-        }
-      }
-      return authorizePasswordAuth({
-        authPassword: auth.password,
-        connectPassword: connectAuth.password,
-        limiter,
-        ip,
-        rateLimitScope,
-      });
     }
     return { ok: false, reason: result.reason };
   }
