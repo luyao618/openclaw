@@ -138,7 +138,7 @@ async function statWorkspaceFileSafely(
 ): Promise<FileMeta | null> {
   try {
     const stat = await workspaceRoot.stat(name);
-    if (!stat.isFile || stat.isSymbolicLink || stat.nlink > 1) {
+    if (!stat.isFile || stat.isSymbolicLink) {
       return null;
     }
     return {
