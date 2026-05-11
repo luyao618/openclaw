@@ -1183,12 +1183,38 @@ export async function runReplyAgent(params: {
       });
   } catch (error) {
     if (error instanceof ReplyRunAlreadyActiveError) {
-      typing.cleanup();
-      return markReplyPayloadForSourceSuppressionDelivery({
-        text: REPLY_RUN_STILL_SHUTTING_DOWN_TEXT,
-      });
+      // Instead of immediately returning a canned "shutting down" message,
+      // wait for the active run to clear and retry once.  With fast-RTT
+      // providers the cleanup-vs-incoming race window is narrow enough that
+      // a brief wait almost always resolves it (#80711).
+      const idled = await replyRunRegistry.waitForIdle(replySessionKey ?? "", 15_000);
+      if (!idled) {
+        typing.cleanup();
+        return markReplyPayloadForSourceSuppressionDelivery({
+          text: REPLY_RUN_STILL_SHUTTING_DOWN_TEXT,
+        });
+      }
+      try {
+        replyOperation =
+          providedReplyOperation ??
+          createReplyOperation({
+            sessionId: followupRun.run.sessionId,
+            sessionKey: replySessionKey ?? "",
+            resetTriggered: effectiveResetTriggered,
+            upstreamAbortSignal: opts?.abortSignal,
+          });
+      } catch (retryError) {
+        if (retryError instanceof ReplyRunAlreadyActiveError) {
+          typing.cleanup();
+          return markReplyPayloadForSourceSuppressionDelivery({
+            text: REPLY_RUN_STILL_SHUTTING_DOWN_TEXT,
+          });
+        }
+        throw retryError;
+      }
+    } else {
+      throw error;
     }
-    throw error;
   }
   let runFollowupTurn = queuedRunFollowupTurn;
   let shouldDrainQueuedFollowupsAfterClear = false;

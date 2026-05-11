@@ -27,11 +27,18 @@ import {
 import { resolveFollowupDeliveryPayloads } from "./followup-delivery.js";
 import { resolveOriginMessageProvider } from "./origin-routing.js";
 import { refreshQueuedFollowupSession, type FollowupRun } from "./queue.js";
-import { createReplyOperation } from "./reply-run-registry.js";
+import {
+  createReplyOperation,
+  ReplyRunAlreadyActiveError,
+  replyRunRegistry,
+  type ReplyOperation,
+} from "./reply-run-registry.js";
 import { isRoutableChannel, routeReply } from "./route-reply.js";
 import { incrementRunCompactionCount, persistRunSessionUsage } from "./session-run-accounting.js";
 import { createTypingSignaler } from "./typing-mode.js";
 import type { TypingController } from "./typing.js";
+
+const FOLLOWUP_ACTIVE_RUN_WAIT_MS = 15_000;
 
 type EmbeddedAgentRunResult = Awaited<ReturnType<typeof runEmbeddedPiAgent>>;
 
@@ -211,12 +218,33 @@ export function createFollowupRunner(params: {
         ? queued
         : { ...queued, run: { ...queued.run, config: runtimeConfig } };
     const run = effectiveQueued.run;
-    const replyOperation = createReplyOperation({
-      sessionId: run.sessionId,
-      sessionKey: replySessionKey ?? "",
-      resetTriggered: false,
-      upstreamAbortSignal: opts?.abortSignal,
-    });
+    // When a new inbound request races the followup drain and registers its
+    // own ReplyOperation first, createReplyOperation throws
+    // ReplyRunAlreadyActiveError.  Instead of losing the queued followup,
+    // wait for the active run to finish and retry once.  This closes the
+    // race window introduced by the fire-and-forget gateway dispatch path
+    // where sequential chat.send requests can interleave with the async
+    // followup drain (#80711).
+    let replyOperation: ReplyOperation;
+    try {
+      replyOperation = createReplyOperation({
+        sessionId: run.sessionId,
+        sessionKey: replySessionKey ?? "",
+        resetTriggered: false,
+        upstreamAbortSignal: opts?.abortSignal,
+      });
+    } catch (error) {
+      if (!(error instanceof ReplyRunAlreadyActiveError)) {
+        throw error;
+      }
+      await replyRunRegistry.waitForIdle(replySessionKey ?? "", FOLLOWUP_ACTIVE_RUN_WAIT_MS);
+      replyOperation = createReplyOperation({
+        sessionId: run.sessionId,
+        sessionKey: replySessionKey ?? "",
+        resetTriggered: false,
+        upstreamAbortSignal: opts?.abortSignal,
+      });
+    }
     try {
       const runId = crypto.randomUUID();
       const shouldSurfaceToControlUi = isInternalMessageChannel(
